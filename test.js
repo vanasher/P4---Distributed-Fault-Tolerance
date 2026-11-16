@@ -1,28 +1,47 @@
-// End-to-end check: starts all nodes on spare ports with a throwaway database, runs the main flows,
-// then kills nodes one by one and checks that the rest of the app keeps working. Run: npm test
+// End-to-end check: starts all nodes on spare ports against throwaway test_* databases, runs the main flows,
+// then kills nodes one by one and checks that the rest of the app keeps working.
+// Needs PostgreSQL on localhost:5432 (docker compose up -d db). Run: npm test
 const assert = require('node:assert');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { Client } = require('pg');
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; // the test's view node uses a throwaway self-signed cert
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'p4-test-'));
 const env = {
   ...process.env,
-  CERT_DIR: tmp,
+  CERT_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'p4-test-')),
   AUTH_ADDR: 'localhost:51051',
   COURSE_ADDR: 'localhost:51052',
   GRADE_ADDR: 'localhost:51053',
   ANNOUNCEMENT_ADDR: 'localhost:51054',
   SCHEDULE_ADDR: 'localhost:51055',
   VIEW_PORT: '3100',
-  DATA_DIR: tmp,
+  DB_PREFIX: 'test_', // services create test_auth, test_course, ... instead of touching the real databases
 };
 const BASE = 'https://localhost:3100';
+const SERVICES = ['auth', 'course', 'grade', 'announcement', 'schedule'];
 const nodes = {};
-for (const name of ['auth', 'course', 'grade', 'announcement', 'schedule']) nodes[name] = spawn('node', [`services/${name}.js`], { env, cwd: __dirname });
-nodes.view = spawn('node', ['view/app.js'], { env, cwd: __dirname });
+
+// Drops the test databases so every run starts from the seed data, then starts all nodes.
+async function start() {
+  let admin;
+  for (let attempt = 1; !admin; attempt++) {
+    const c = new Client({ host: process.env.PGHOST || 'localhost', user: 'p4', password: 'p4', database: 'postgres', connectionTimeoutMillis: 2000 });
+    try {
+      await c.connect();
+      admin = c;
+    } catch (e) {
+      if (attempt === 20) throw new Error(`PostgreSQL is not reachable on localhost:5432 (${e.message}). Start it with: docker compose up -d db`);
+      await sleep(1000); // first start of the db container takes a few seconds
+    }
+  }
+  for (const s of SERVICES) await admin.query(`DROP DATABASE IF EXISTS test_${s} WITH (FORCE)`);
+  await admin.end();
+  for (const s of SERVICES) nodes[s] = spawn('node', [`services/${s}.js`], { env, cwd: __dirname });
+  nodes.view = spawn('node', ['view/app.js'], { env, cwd: __dirname });
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -50,6 +69,7 @@ async function login(username) {
 }
 
 async function main() {
+  await start();
   const student = await login('student1');
 
   // Bad password is rejected.
@@ -65,6 +85,12 @@ async function main() {
   const student2 = await login('student2');
   assert.match((await req('POST', '/courses/STDISCM/enroll', { cookie: student2 })).location, /Enrolled/);
   assert.match((await req('GET', '/courses', { cookie: student2 })).body, /2 \/ 2/);
+
+  // Concurrency: 8 simultaneous enroll requests for the same seat -> exactly one succeeds (row lock in a transaction).
+  const burst = await Promise.all(Array.from({ length: 8 }, () => req('POST', '/courses/CSARCH2/enroll', { cookie: student2 })));
+  assert.equal(burst.filter((r) => /Enrolled in CSARCH2/.test(r.location)).length, 1);
+  assert.equal(burst.filter((r) => /already enrolled/.test(r.location)).length, 7);
+  assert.match((await req('GET', '/courses', { cookie: student2 })).body, /1 \/ 3/);
 
   // Previous grades: students see only their own.
   const g1 = (await req('GET', '/grades', { cookie: student })).body;

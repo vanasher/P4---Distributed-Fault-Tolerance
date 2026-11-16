@@ -1,16 +1,18 @@
 # Each node is its own container with its own network stack and a static IP on the explicitly configured
 # "p4" bridge network (172.28.0.0/24). Nodes reach each other over gRPC at these fixed IPs.
-#   view    172.28.0.10  (only node published to the host, on port 3000)
-#   auth    172.28.0.11:50051
-#   course  172.28.0.12:50052
-#   grade   172.28.0.13:50053
+#   view         172.28.0.10       (only app node published to the host, on port 3000)
+#   auth         172.28.0.11:50051
+#   course       172.28.0.12:50052
+#   grade        172.28.0.13:50053
 #   announcement 172.28.0.14:50054
 #   schedule     172.28.0.15:50055  (also calls course over gRPC)
+#   db           172.28.0.20:5432   PostgreSQL, one database per service, each service has its own connection pool
 # Start: docker compose up --build -d    Kill a node: docker stop p4-grade    Bring it back: docker start p4-grade
 x-node: &node
   pull_policy: never  # built once by the auth service below
   image: p4-enrollment
   init: true  # so docker stop kills the node instantly instead of after 10s
+  depends_on: [db]
   environment:
     AUTH_ADDR: 172.28.0.11:50051
     COURSE_ADDR: 172.28.0.12:50052
@@ -18,8 +20,22 @@ x-node: &node
     ANNOUNCEMENT_ADDR: 172.28.0.14:50054
     SCHEDULE_ADDR: 172.28.0.15:50055
     JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+    PGHOST: 172.28.0.20
+    PGUSER: p4
+    PGPASSWORD: p4
+    DB_POOL_MAX: 10
 
 services:
+  db:
+    image: postgres:17-alpine
+    container_name: p4-db
+    environment:
+      POSTGRES_USER: p4
+      POSTGRES_PASSWORD: p4
+    networks:
+      p4: { ipv4_address: 172.28.0.20 }
+    ports: ["5432:5432"]  # so `npm run ...` and `npm test` on the host can use it too
+    volumes: [pg-data:/var/lib/postgresql/data]
   auth:
     <<: *node
     container_name: p4-auth
@@ -27,35 +43,30 @@ services:
     command: node services/auth.js
     networks:
       p4: { ipv4_address: 172.28.0.11 }
-    volumes: [auth-data:/app/data]
   course:
     <<: *node
     container_name: p4-course
     command: node services/course.js
     networks:
       p4: { ipv4_address: 172.28.0.12 }
-    volumes: [course-data:/app/data]
   grade:
     <<: *node
     container_name: p4-grade
     command: node services/grade.js
     networks:
       p4: { ipv4_address: 172.28.0.13 }
-    volumes: [grade-data:/app/data]
   announcement:
     <<: *node
     container_name: p4-announcement
     command: node services/announcement.js
     networks:
       p4: { ipv4_address: 172.28.0.14 }
-    volumes: [announcement-data:/app/data]
   schedule:
     <<: *node
     container_name: p4-schedule
     command: node services/schedule.js
     networks:
       p4: { ipv4_address: 172.28.0.15 }
-    volumes: [schedule-data:/app/data]
   view:
     <<: *node
     container_name: p4-view
@@ -75,8 +86,4 @@ networks:
           gateway: 172.28.0.1
 
 volumes:
-  auth-data:
-  course-data:
-  grade-data:
-  announcement-data:
-  schedule-data:
+  pg-data:

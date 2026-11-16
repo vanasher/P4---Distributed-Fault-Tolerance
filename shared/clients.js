@@ -22,7 +22,8 @@ function call(service, method, request, token, ms = 2000) {
     clients[service][method](request, metadata, { deadline: Date.now() + ms }, (err, reply) => {
       if (!err) return resolve(reply);
       err.down = err.code === grpc.status.UNAVAILABLE || err.code === grpc.status.DEADLINE_EXCEEDED;
-      if (err.down) err.details = `The ${service} service is down right now. Other features still work.`;
+      // The node itself is unreachable (vs. the node answering that its database is unavailable).
+      if (err.down && !/database/i.test(err.details || '')) err.details = `The ${service} service is down right now. Other features still work.`;
       reject(err);
     });
   });

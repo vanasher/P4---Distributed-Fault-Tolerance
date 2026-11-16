@@ -1,38 +1,37 @@
 // Auth node: checks passwords, issues JWTs, tracks sessions.
 const crypto = require('node:crypto');
 const jwt = require('jsonwebtoken');
-const { SECRET, fail, requireUser, openDb, serve } = require('../shared/common');
-
-const db = openDb('auth.db', `
-  CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, salt TEXT, hash TEXT, role TEXT);
-  CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, username TEXT, created TEXT);
-`);
+const { SECRET, fail, requireUser, openDb, serve, main } = require('../shared/common');
 
 const hash = (password, salt) => crypto.scryptSync(password, salt, 32).toString('hex');
 
-if (!db.prepare('SELECT 1 FROM users').get()) {
-  const add = db.prepare('INSERT INTO users VALUES (?, ?, ?, ?)');
+main(async () => {
+  const db = await openDb('auth', `
+    CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, salt TEXT NOT NULL, hash TEXT NOT NULL, role TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, username TEXT NOT NULL, created TIMESTAMPTZ NOT NULL DEFAULT now());
+  `);
+
   for (const [username, role] of [['student1', 'student'], ['student2', 'student'], ['faculty1', 'faculty']]) {
     const salt = crypto.randomBytes(16).toString('hex');
-    add.run(username, salt, hash('password', salt), role);
+    await db.query('INSERT INTO users VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING', [username, salt, hash('password', salt), role]);
   }
-}
 
-serve('Auth', {
-  Login({ request: { username, password } }) {
-    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-    const ok = user && crypto.timingSafeEqual(Buffer.from(hash(password, user.salt), 'hex'), Buffer.from(user.hash, 'hex'));
-    if (!ok) fail('UNAUTHENTICATED', 'Wrong username or password.');
+  serve('Auth', {
+    async Login({ request: { username, password } }) {
+      const { rows: [user] } = await db.query('SELECT * FROM users WHERE username = $1', [username]);
+      const ok = user && crypto.timingSafeEqual(Buffer.from(hash(password, user.salt), 'hex'), Buffer.from(user.hash, 'hex'));
+      if (!ok) fail('UNAUTHENTICATED', 'Wrong username or password.');
 
-    const id = crypto.randomUUID();
-    db.prepare('INSERT INTO sessions VALUES (?, ?, ?)').run(id, username, new Date().toISOString());
-    const token = jwt.sign({ sub: username, role: user.role }, SECRET, { expiresIn: '1h', jwtid: id });
-    return { token, username, role: user.role };
-  },
+      const id = crypto.randomUUID();
+      await db.query('INSERT INTO sessions (id, username) VALUES ($1, $2)', [id, username]);
+      const token = jwt.sign({ sub: username, role: user.role }, SECRET, { expiresIn: '1h', jwtid: id });
+      return { token, username, role: user.role };
+    },
 
-  Logout(call) {
-    const user = requireUser(call);
-    db.prepare('DELETE FROM sessions WHERE id = ?').run(user.jti);
-    return {};
-  },
+    async Logout(call) {
+      const user = requireUser(call);
+      await db.query('DELETE FROM sessions WHERE id = $1', [user.jti]);
+      return {};
+    },
+  });
 });
