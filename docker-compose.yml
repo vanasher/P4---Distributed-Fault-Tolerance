@@ -1,0 +1,62 @@
+# Each node is its own container with its own network stack and a static IP on the explicitly configured
+# "p4" bridge network (172.28.0.0/24). Nodes reach each other over gRPC at these fixed IPs.
+#   view    172.28.0.10  (only node published to the host, on port 3000)
+#   auth    172.28.0.11:50051
+#   course  172.28.0.12:50052
+#   grade   172.28.0.13:50053
+# Start: docker compose up --build -d    Kill a node: docker stop p4-grade    Bring it back: docker start p4-grade
+x-node: &node
+  pull_policy: never  # built once by the auth service below
+  image: p4-enrollment
+  init: true  # so docker stop kills the node instantly instead of after 10s
+  environment:
+    AUTH_ADDR: 172.28.0.11:50051
+    COURSE_ADDR: 172.28.0.12:50052
+    GRADE_ADDR: 172.28.0.13:50053
+    JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+
+services:
+  auth:
+    <<: *node
+    container_name: p4-auth
+    build: .  # builds the shared image once
+    command: node services/auth.js
+    networks:
+      p4: { ipv4_address: 172.28.0.11 }
+    volumes: [auth-data:/app/data]
+  course:
+    <<: *node
+    container_name: p4-course
+    command: node services/course.js
+    networks:
+      p4: { ipv4_address: 172.28.0.12 }
+    volumes: [course-data:/app/data]
+  grade:
+    <<: *node
+    container_name: p4-grade
+    command: node services/grade.js
+    networks:
+      p4: { ipv4_address: 172.28.0.13 }
+    volumes: [grade-data:/app/data]
+  view:
+    <<: *node
+    container_name: p4-view
+    command: node view/app.js
+    networks:
+      p4: { ipv4_address: 172.28.0.10 }
+    ports: ["3000:3000"]
+    volumes: [./certs:/app/certs]  # reuses your mkcert/self-signed cert from the repo folder
+
+networks:
+  p4:
+    name: p4-net
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+          gateway: 172.28.0.1
+
+volumes:
+  auth-data:
+  course-data:
+  grade-data:

@@ -49,6 +49,32 @@ mkcert -cert-file certs/cert.pem -key-file certs/key.pem localhost 127.0.0.1 <th
 
 Internal gRPC traffic between the nodes is plaintext.
 
+## Run (Docker, each node in its own container)
+
+This needs Docker Desktop to be running. Each node runs in its own container with its own network stack. The networking is configured explicitly in `docker-compose.yml`: a bridge network `p4-net` on subnet `172.28.0.0/24`, with a static IP for each node. The view reaches the services over gRPC at those IPs.
+
+| Container | IP | Port |
+|---|---|---|
+| p4-view | 172.28.0.10 | 3000, the only port published to the host |
+| p4-auth | 172.28.0.11 | 50051 |
+| p4-course | 172.28.0.12 | 50052 |
+| p4-grade | 172.28.0.13 | 50053 |
+
+```
+docker compose up --build -d     # build the image and start all 4 nodes
+docker compose ps                # list the containers: p4-auth, p4-course, p4-grade, p4-view
+docker compose logs -f grade     # follow one node's gRPC log
+```
+
+Open https://localhost:3000. To demo fault tolerance:
+
+```
+docker stop p4-grade     # grade node down: the grades page says so, everything else still works
+docker start p4-grade    # back within about 2 seconds, with no data lost
+```
+
+To stop everything, run `docker compose down`. Adding `-v` also wipes the databases. Each service keeps its data in its own Docker volume. The view reuses the certificate in `certs/`, so an mkcert certificate works here too.
+
 ## Run (separate machines / VMs)
 
 Copy the repo and run `npm install` on each machine. Then set the addresses and the shared JWT secret on every node:
