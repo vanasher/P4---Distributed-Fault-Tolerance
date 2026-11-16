@@ -21,6 +21,11 @@
   input, textarea, button { font: inherit; padding: 6px 10px; }
   textarea { width: 100%; box-sizing: border-box; }
   label { display: block; margin: 12px 0 4px; }
+  input[type=text] { width: 100%; box-sizing: border-box; }
+  .post { background: #fff; border: 1px solid #e3e6ec; padding: 14px 18px; margin: 12px 0; }
+  .post h3 { margin: 0 0 4px; }
+  .post p { white-space: pre-wrap; margin: 8px 0 0; }
+  .note { background: #fff6e0; border: 1px solid #e8c879; padding: 10px 14px; }
 </style>
 </head>
 <body>
@@ -29,6 +34,8 @@
   <% if (user) { %>
     <a href="/courses">Courses</a>
     <a href="/grades">Grades</a>
+    <a href="/schedule">Schedule</a>
+    <a href="/announcements">Announcements</a>
     <span class="who"><%= user.sub %> (<%= user.role %>)</span>
     <form method="post" action="/logout"><button>Log out</button></form>
   <% } %>

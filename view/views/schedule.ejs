@@ -1,0 +1,14 @@
+<%- include('partials/header') %>
+<h1><%= user.role === 'student' ? 'My class schedule' : 'Class schedule' %></h1>
+<% if (note) { %><p class="note"><%= note %></p><% } %>
+<% if (slots.length) { %>
+<table>
+  <tr><th>Day</th><th>Time</th><th>Course</th><th>Room</th></tr>
+  <% for (const s of slots) { %>
+  <tr><td><%= s.day %></td><td><%= s.start %>–<%= s.end %></td><td><%= s.code %></td><td><%= s.room %></td></tr>
+  <% } %>
+</table>
+<% } else if (!error) { %>
+<p class="muted">You are not enrolled in any classes yet.</p>
+<% } %>
+<%- include('partials/footer') %>

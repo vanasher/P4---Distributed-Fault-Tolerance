@@ -1,6 +1,6 @@
 # P4 – Distributed Fault-Tolerant Enrollment System
 
-An online enrollment system split across four nodes. The view node is an Express MVC web app; every feature lives on its own service node, and nodes talk to each other only over gRPC.
+An online enrollment system split across six nodes. The view node is an Express MVC web app; every feature lives on its own service node, and nodes talk to each other only over gRPC.
 
 | Node | File | Default address | Features |
 |---|---|---|---|
@@ -8,8 +8,10 @@ An online enrollment system split across four nodes. The view node is an Express
 | Auth | `services/auth.js` | localhost:50051 | Login / logout, issues JWTs, tracks sessions |
 | Course | `services/course.js` | localhost:50052 | View courses, enroll in open courses |
 | Grade | `services/grade.js` | localhost:50053 | View previous grades, faculty upload grades |
+| Announcement *(bonus)* | `services/announcement.js` | localhost:50054 | Faculty post announcements, everyone reads them |
+| Schedule *(bonus)* | `services/schedule.js` | localhost:50055 | Class timetable; calls the course node over gRPC to find a student's classes |
 
-The gRPC contract for all three services is in `proto/enrollment.proto`. Each service node keeps its own SQLite database in `data/`.
+The gRPC contract for all five services is in `proto/enrollment.proto`. Each service node keeps its own SQLite database in `data/`.
 
 ## Build
 
@@ -23,12 +25,14 @@ There's no compile step. The proto file is loaded at runtime.
 
 ## Run (one machine)
 
-Open four terminals in this folder and run one node in each:
+Open six terminals in this folder and run one node in each:
 
 ```
 npm run auth
 npm run course
 npm run grade
+npm run announcement
+npm run schedule
 npm run view
 ```
 
@@ -59,10 +63,12 @@ This needs Docker Desktop to be running. Each node runs in its own container wit
 | p4-auth | 172.28.0.11 | 50051 |
 | p4-course | 172.28.0.12 | 50052 |
 | p4-grade | 172.28.0.13 | 50053 |
+| p4-announcement | 172.28.0.14 | 50054 |
+| p4-schedule | 172.28.0.15 | 50055 |
 
 ```
-docker compose up --build -d     # build the image and start all 4 nodes
-docker compose ps                # list the containers: p4-auth, p4-course, p4-grade, p4-view
+docker compose up --build -d     # build the image and start all 6 nodes
+docker compose ps                # list the 6 containers
 docker compose logs -f grade     # follow one node's gRPC log
 ```
 
@@ -82,11 +88,12 @@ Copy the repo and run `npm install` on each machine. Then set the addresses and 
 ```
 # PowerShell
 $env:AUTH_ADDR="192.168.1.11:50051"; $env:COURSE_ADDR="192.168.1.12:50052"; $env:GRADE_ADDR="192.168.1.13:50053"
+$env:ANNOUNCEMENT_ADDR="192.168.1.14:50054"; $env:SCHEDULE_ADDR="192.168.1.15:50055"
 $env:JWT_SECRET="same-secret-on-every-node"
-npm run view   # or auth / course / grade
+npm run view   # or auth / course / grade / announcement / schedule
 ```
 
-Service nodes listen on `0.0.0.0` at the port from their own address. Open those ports in the firewall.
+The view and the schedule node need the addresses (schedule only needs `COURSE_ADDR`). Service nodes listen on `0.0.0.0` at the port from their own address. Open those ports in the firewall.
 
 ## Test
 
@@ -94,8 +101,9 @@ Service nodes listen on `0.0.0.0` at the port from their own address. Open those
 npm test
 ```
 
-This starts all four nodes on spare ports with a throwaway database. It then runs the following checks:
-- login, enrollment, capacity, grade viewing and uploading
+This starts all six nodes on spare ports with a throwaway database. It then runs the following checks:
+- login, enrollment, capacity, grade viewing and uploading, announcements, schedule
+- input validation edge cases (bad CSV lines, duplicates, oversized posts, missing fields)
 - killing each service node in turn, to confirm the rest of the app keeps working
 - restarting a node, to confirm the app picks it back up
 
@@ -105,3 +113,4 @@ This starts all four nodes on spare ports with a throwaway database. It then run
 - **Fail fast, degrade locally.** The view node gives every gRPC call a 2-second deadline. When a node is down, its call fails with `UNAVAILABLE`, and only that page shows "the X service is down". The other pages keep working.
 - **Sessions survive the auth node going down.** Login returns a signed JWT that the view stores in a cookie and forwards with every gRPC call. Every service checks the signature itself with the shared secret, so it doesn't need to ask the auth node. Users who are already logged in keep using courses and grades while auth is down; only new logins fail.
 - **Automatic recovery.** The gRPC clients reconnect with a short backoff, capped at 2 seconds, so a restarted node is picked up without restarting the view. The data persists in SQLite, so nothing is lost across a restart.
+- **Graceful degradation between nodes.** The schedule node depends on the course node to know which classes a student is in. If the course node is down, the schedule node doesn't fail. It shows every class with a note saying enrollments couldn't be loaded. Its call to the course node uses a 1-second deadline, so it answers before the view's 2-second deadline runs out.

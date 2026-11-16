@@ -4,6 +4,8 @@
 #   auth    172.28.0.11:50051
 #   course  172.28.0.12:50052
 #   grade   172.28.0.13:50053
+#   announcement 172.28.0.14:50054
+#   schedule     172.28.0.15:50055  (also calls course over gRPC)
 # Start: docker compose up --build -d    Kill a node: docker stop p4-grade    Bring it back: docker start p4-grade
 x-node: &node
   pull_policy: never  # built once by the auth service below
@@ -13,6 +15,8 @@ x-node: &node
     AUTH_ADDR: 172.28.0.11:50051
     COURSE_ADDR: 172.28.0.12:50052
     GRADE_ADDR: 172.28.0.13:50053
+    ANNOUNCEMENT_ADDR: 172.28.0.14:50054
+    SCHEDULE_ADDR: 172.28.0.15:50055
     JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
 
 services:
@@ -38,6 +42,20 @@ services:
     networks:
       p4: { ipv4_address: 172.28.0.13 }
     volumes: [grade-data:/app/data]
+  announcement:
+    <<: *node
+    container_name: p4-announcement
+    command: node services/announcement.js
+    networks:
+      p4: { ipv4_address: 172.28.0.14 }
+    volumes: [announcement-data:/app/data]
+  schedule:
+    <<: *node
+    container_name: p4-schedule
+    command: node services/schedule.js
+    networks:
+      p4: { ipv4_address: 172.28.0.15 }
+    volumes: [schedule-data:/app/data]
   view:
     <<: *node
     container_name: p4-view
@@ -60,3 +78,5 @@ volumes:
   auth-data:
   course-data:
   grade-data:
+  announcement-data:
+  schedule-data:

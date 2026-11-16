@@ -17,6 +17,8 @@ const ADDR = {
   auth: process.env.AUTH_ADDR || 'localhost:50051',
   course: process.env.COURSE_ADDR || 'localhost:50052',
   grade: process.env.GRADE_ADDR || 'localhost:50053',
+  announcement: process.env.ANNOUNCEMENT_ADDR || 'localhost:50054',
+  schedule: process.env.SCHEDULE_ADDR || 'localhost:50055',
 };
 
 function fail(code, details) {
@@ -46,19 +48,23 @@ function openDb(file, schema) {
   return db;
 }
 
-// Starts a gRPC server for one service. Handlers are plain functions that return the reply or throw via fail().
+// Starts a gRPC server for one service. Handlers return the reply (or a promise of it) or throw via fail().
+// A synchronous handler still runs start to finish without interleaving, so its DB checks stay atomic.
 function serve(name, handlers) {
   const impl = {};
   for (const [method, fn] of Object.entries(handlers)) {
     impl[method] = (call, cb) => {
-      try {
-        cb(null, fn(call));
-        console.log(`${new Date().toISOString()} ${name}.${method} ok`);
-      } catch (e) {
-        const err = e.code !== undefined ? e : { code: grpc.status.INTERNAL, details: String(e.message) };
-        console.log(`${new Date().toISOString()} ${name}.${method} failed: ${err.details}`);
-        cb(err);
-      }
+      Promise.resolve()
+        .then(() => fn(call))
+        .then((reply) => {
+          console.log(`${new Date().toISOString()} ${name}.${method} ok`);
+          cb(null, reply);
+        })
+        .catch((e) => {
+          const err = e.code !== undefined ? { code: e.code, details: e.details } : { code: grpc.status.INTERNAL, details: String(e.message) };
+          console.log(`${new Date().toISOString()} ${name}.${method} failed: ${err.details}`);
+          cb(err);
+        });
     };
   }
   const server = new grpc.Server();

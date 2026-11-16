@@ -7,6 +7,8 @@
     "auth": "node services/auth.js",
     "course": "node services/course.js",
     "grade": "node services/grade.js",
+    "announcement": "node services/announcement.js",
+    "schedule": "node services/schedule.js",
     "view": "node view/app.js",
     "test": "node test.js"
   },

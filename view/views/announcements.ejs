@@ -1,0 +1,22 @@
+<%- include('partials/header') %>
+<h1>Announcements</h1>
+
+<% if (user.role === 'faculty') { %>
+<form method="post" action="/announcements">
+  <label for="title">Title</label>
+  <input id="title" name="title" type="text" maxlength="100" required>
+  <label for="body">Message</label>
+  <textarea id="body" name="body" rows="4" maxlength="2000" required></textarea>
+  <p><button>Post</button></p>
+</form>
+<% } %>
+
+<% for (const a of announcements) { %>
+<div class="post">
+  <h3><%= a.title %></h3>
+  <span class="muted"><%= a.author %> · <%= new Date(a.posted).toLocaleString('en-PH', { timeZone: 'Asia/Manila' }) %></span>
+  <p><%= a.body %></p>
+</div>
+<% } %>
+<% if (!announcements.length && !error) { %><p class="muted">No announcements yet.</p><% } %>
+<%- include('partials/footer') %>

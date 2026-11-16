@@ -14,12 +14,14 @@ const env = {
   AUTH_ADDR: 'localhost:51051',
   COURSE_ADDR: 'localhost:51052',
   GRADE_ADDR: 'localhost:51053',
+  ANNOUNCEMENT_ADDR: 'localhost:51054',
+  SCHEDULE_ADDR: 'localhost:51055',
   VIEW_PORT: '3100',
   DATA_DIR: tmp,
 };
 const BASE = 'https://localhost:3100';
 const nodes = {};
-for (const name of ['auth', 'course', 'grade']) nodes[name] = spawn('node', [`services/${name}.js`], { env, cwd: __dirname });
+for (const name of ['auth', 'course', 'grade', 'announcement', 'schedule']) nodes[name] = spawn('node', [`services/${name}.js`], { env, cwd: __dirname });
 nodes.view = spawn('node', ['view/app.js'], { env, cwd: __dirname });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -72,10 +74,43 @@ async function main() {
   // Faculty uploads; bad line rejects the whole upload; students cannot upload.
   const faculty = await login('faculty1');
   assert.match((await req('POST', '/courses/STDISCM/enroll', { cookie: faculty })).location, /Only student/);
-  assert.match((await req('POST', '/grades', { cookie: faculty, form: { csv: 'student1,STDISCM,4.0\nstudent2,STDISCM,9.9' } })).location, /Line 2/);
+  assert.match((await req('POST', '/grades', { cookie: faculty, form: { csv: 'student1,STDISCM,4.0\nstudent2,STDISCM,9.9' } })).location, /9\.9.*grade must be/);
   assert.match((await req('POST', '/grades', { cookie: faculty, form: { csv: 'student1,STDISCM,4.0\nstudent2,STDISCM,3.5' } })).location, /Saved 2 grades/);
   assert.match((await req('POST', '/grades', { cookie: student, form: { csv: 'student1,STDISCM,4.0' } })).location, /Only faculty/);
   assert.match((await req('GET', '/grades', { cookie: student })).body, /STDISCM/);
+
+  // Input validation edge cases: bad uploads change nothing and never crash the view.
+  const upload = async (csv) => (await req('POST', '/grades', { cookie: faculty, form: { csv } })).location;
+  assert.match(await upload('student1,STDISCM,4.0,oops'), /each line must be/);
+  assert.match(await upload('student1,4.0'), /each line must be/);
+  assert.match(await upload('student1,STDISCM,4.0\nstudent1,STDISCM,1.0'), /appears twice/);
+  assert.match(await upload('student1,<b>x</b>,4.0'), /invalid course code/);
+  assert.match(await upload('student 1,STDISCM,4.0'), /invalid student/);
+  assert.match(await upload('student1,STDISCM,3.25'), /grade must be/);
+  assert.match(await upload('\n \n'), /No grades given/);
+  assert.match(await upload('student,course,grade\r\nstudent2,CSARCH2,3'), /Saved 1 grade\./); // header skipped, "3" stored as 3.0
+  assert.match((await req('GET', '/grades', { cookie: student2 })).body, /CSARCH2<\/td><td>3\.0/);
+  assert.equal((await req('POST', '/grades', { cookie: faculty })).status, 302); // no form body: no 500
+  assert.match((await req('POST', '/grades', { cookie: faculty, form: { csv: 'x'.repeat(200_000) } })).location, /too large/);
+  assert.match((await req('POST', '/login')).body, /Enter your username/);
+  assert.ok((await req('POST', '/login', { form: { username: ' student1 ', password: 'password' } })).cookie); // trimmed
+  assert.match((await req('POST', `/courses/${'A'.repeat(5000)}/enroll`, { cookie: student })).location, /Invalid course code/);
+  assert.match((await req('POST', '/courses/csopesy/enroll', { cookie: student })).location, /Enrolled in CSOPESY/); // case-insensitive
+
+  // Announcements: faculty post, everyone reads, students cannot post, empty posts rejected.
+  assert.match((await req('GET', '/announcements', { cookie: student })).body, /Enrollment is open/);
+  assert.match((await req('POST', '/announcements', { cookie: faculty, form: { title: 'Exam moved', body: 'Line 1\nLine 2' } })).location, /posted/);
+  assert.match((await req('GET', '/announcements', { cookie: student2 })).body, /Exam moved/);
+  assert.match((await req('POST', '/announcements', { cookie: student, form: { title: 'hi', body: 'hi' } })).location, /Only faculty/);
+  assert.match((await req('POST', '/announcements', { cookie: faculty, form: { title: '   ', body: 'x' } })).location, /Title must be/);
+  assert.match((await req('POST', '/announcements', { cookie: faculty, form: { title: 't', body: 'x'.repeat(2001) } })).location, /Message must be/);
+
+  // Schedule: student sees only their enrolled classes (schedule node asks the course node over gRPC); faculty sees all.
+  const sched = (await req('GET', '/schedule', { cookie: student })).body; // student1 is in STDISCM and CSOPESY
+  assert.match(sched, /STDISCM/);
+  assert.match(sched, /CSOPESY/);
+  assert.doesNotMatch(sched, /CSARCH2/);
+  assert.match((await req('GET', '/schedule', { cookie: faculty })).body, /CSALGCM/);
 
   // Fault tolerance: grade node down -> grades page says so, courses still work.
   nodes.grade.kill();
@@ -102,6 +137,19 @@ async function main() {
   nodes.course.kill();
   await sleep(500);
   assert.match((await req('GET', '/courses', { cookie: student })).body, /course service is down/);
+
+  // Schedule node degrades when the course node it depends on is down: shows all classes with a note.
+  const degraded = (await req('GET', '/schedule', { cookie: student })).body;
+  assert.match(degraded, /course service is down, so your enrollments could not be loaded/);
+  assert.match(degraded, /CSARCH2/);
+
+  // Announcement and schedule nodes down -> only their pages say so.
+  nodes.announcement.kill();
+  nodes.schedule.kill();
+  await sleep(500);
+  assert.match((await req('GET', '/announcements', { cookie: student })).body, /announcement service is down/);
+  assert.match((await req('GET', '/schedule', { cookie: student })).body, /schedule service is down/);
+  assert.match((await req('GET', '/grades', { cookie: student })).body, /CCPROG1/);
 
   // Logout still works locally when auth is down.
   assert.equal((await req('POST', '/logout', { cookie: student })).location, '/login');

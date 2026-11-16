@@ -29,8 +29,10 @@ serve('Course', {
   // with another enrollment. No two students can take the last seat.
   Enroll(call) {
     const user = requireUser(call, 'student');
-    const course = db.prepare('SELECT * FROM courses WHERE code = ?').get(call.request.code);
-    if (!course) fail('NOT_FOUND', `Course ${call.request.code} does not exist.`);
+    const code = call.request.code.trim().toUpperCase();
+    if (!/^[A-Z0-9-]{2,12}$/.test(code)) fail('INVALID_ARGUMENT', 'Invalid course code.');
+    const course = db.prepare('SELECT * FROM courses WHERE code = ?').get(code);
+    if (!course) fail('NOT_FOUND', `Course ${code} does not exist.`);
     if (!course.open) fail('FAILED_PRECONDITION', `${course.code} is not open for enrollment.`);
     if (db.prepare('SELECT 1 FROM enrollments WHERE student = ? AND code = ?').get(user.sub, course.code))
       fail('ALREADY_EXISTS', `You are already enrolled in ${course.code}.`);
