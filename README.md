@@ -29,7 +29,7 @@ Requires Node.js 22 and PostgreSQL. The easiest way to get PostgreSQL is Docker:
 
 ```
 npm install
-docker compose up -d db     # PostgreSQL on localhost:5432 (user p4, password p4)
+docker compose up -d db     # PostgreSQL on localhost:5433 (user p4, password p4)
 ```
 
 There's no compile step. The proto file is loaded at runtime.
@@ -76,7 +76,7 @@ This needs Docker Desktop to be running. Each node runs in its own container wit
 | p4-grade | 172.28.0.13 | 50053 |
 | p4-announcement | 172.28.0.14 | 50054 |
 | p4-schedule | 172.28.0.15 | 50055 |
-| p4-db (PostgreSQL) | 172.28.0.20 | 5432, also published to the host so `npm run` and `npm test` can use it |
+| p4-db (PostgreSQL) | 172.28.0.20 | 5432 inside the network, published to the host as **5433** (so it never clashes with a locally installed PostgreSQL) |
 
 ```
 docker compose up --build -d     # build the image and start all 6 nodes plus PostgreSQL

@@ -21,6 +21,7 @@ x-node: &node
     SCHEDULE_ADDR: 172.28.0.15:50055
     JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
     PGHOST: 172.28.0.20
+    PGPORT: 5432  # container-to-container: the db container's own port
     PGUSER: p4
     PGPASSWORD: p4
     DB_POOL_MAX: 10
@@ -34,7 +35,7 @@ services:
       POSTGRES_PASSWORD: p4
     networks:
       p4: { ipv4_address: 172.28.0.20 }
-    ports: ["5432:5432"]  # so `npm run ...` and `npm test` on the host can use it too
+    ports: ["5433:5432"]  # host port 5433 (not 5432) so a locally installed PostgreSQL never clashes; used by `npm run` and `npm test`
     volumes: [pg-data:/var/lib/postgresql/data]
   auth:
     <<: *node

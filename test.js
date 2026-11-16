@@ -1,6 +1,6 @@
 // End-to-end check: starts all nodes on spare ports against throwaway test_* databases, runs the main flows,
 // then kills nodes one by one and checks that the rest of the app keeps working.
-// Needs PostgreSQL on localhost:5432 (docker compose up -d db). Run: npm test
+// Needs PostgreSQL on localhost:5433 (docker compose up -d db). Run: npm test
 const assert = require('node:assert');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
@@ -26,14 +26,16 @@ const nodes = {};
 
 // Drops the test databases so every run starts from the seed data, then starts all nodes.
 async function start() {
+  const host = process.env.PGHOST || 'localhost';
+  const port = Number(process.env.PGPORT || 5433);
   let admin;
   for (let attempt = 1; !admin; attempt++) {
-    const c = new Client({ host: process.env.PGHOST || 'localhost', user: 'p4', password: 'p4', database: 'postgres', connectionTimeoutMillis: 2000 });
+    const c = new Client({ host, port, user: 'p4', password: 'p4', database: 'postgres', connectionTimeoutMillis: 2000 });
     try {
       await c.connect();
       admin = c;
     } catch (e) {
-      if (attempt === 20) throw new Error(`PostgreSQL is not reachable on localhost:5432 (${e.message}). Start it with: docker compose up -d db`);
+      if (attempt === 20) throw new Error(`PostgreSQL is not reachable on ${host}:${port} (${e.message}). Start it with: docker compose up -d db`);
       await sleep(1000); // first start of the db container takes a few seconds
     }
   }

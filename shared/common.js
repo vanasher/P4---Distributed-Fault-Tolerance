@@ -42,7 +42,7 @@ function requireUser(call, role) {
 // PostgreSQL: one shared server, one database per service (database-per-service pattern).
 const PG = {
   host: process.env.PGHOST || 'localhost',
-  port: Number(process.env.PGPORT || 5432),
+  port: Number(process.env.PGPORT || 5433), // host port of the db container; 5433 avoids clashing with a locally installed PostgreSQL
   user: process.env.PGUSER || 'p4',
   password: process.env.PGPASSWORD || 'p4',
 };
