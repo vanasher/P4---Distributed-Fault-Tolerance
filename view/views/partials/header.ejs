@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Enrollment System</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; background: #f6f7f9; color: #1c2230; }
+  header { display: flex; align-items: center; gap: 24px; padding: 12px 24px; background: #1c2230; color: #fff; }
+  header a { color: #cfd6e4; text-decoration: none; }
+  header a:hover { color: #fff; }
+  header .who { margin-left: auto; color: #9aa4b8; }
+  header form { margin: 0; }
+  main { max-width: 860px; margin: 32px auto; padding: 0 16px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #e3e6ec; }
+  th { background: #eef0f4; font-weight: 600; }
+  .ok { background: #e3f4e8; border: 1px solid #9cd3ae; padding: 10px 14px; }
+  .err { background: #fbe7e7; border: 1px solid #e3a3a3; padding: 10px 14px; }
+  .muted { color: #6b7385; }
+  input, textarea, button { font: inherit; padding: 6px 10px; }
+  textarea { width: 100%; box-sizing: border-box; }
+  label { display: block; margin: 12px 0 4px; }
+</style>
+</head>
+<body>
+<header>
+  <b>Enrollment System</b>
+  <% if (user) { %>
+    <a href="/courses">Courses</a>
+    <a href="/grades">Grades</a>
+    <span class="who"><%= user.sub %> (<%= user.role %>)</span>
+    <form method="post" action="/logout"><button>Log out</button></form>
+  <% } %>
+</header>
+<main>
+<% if (msg) { %><p class="ok"><%= msg %></p><% } %>
+<% if (error) { %><p class="err"><%= error %></p><% } %>

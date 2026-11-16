@@ -1,0 +1,30 @@
+<%- include('partials/header') %>
+<h1><%= user.role === 'faculty' ? 'All grades' : 'My grades' %></h1>
+<% if (grades.length) { %>
+<table>
+  <tr><% if (user.role === 'faculty') { %><th>Student</th><% } %><th>Course</th><th>Grade</th></tr>
+  <% for (const g of grades) { %>
+  <tr><% if (user.role === 'faculty') { %><td><%= g.student %></td><% } %><td><%= g.course %></td><td><%= g.grade %></td></tr>
+  <% } %>
+</table>
+<% } else if (!error) { %>
+<p class="muted">No grades yet.</p>
+<% } %>
+
+<% if (user.role === 'faculty') { %>
+<h2>Upload grades</h2>
+<form method="post" action="/grades">
+  <label for="file">CSV file (optional, fills the box below)</label>
+  <input id="file" type="file" accept=".csv,.txt">
+  <label for="csv">One <code>student,course,grade</code> per line</label>
+  <textarea id="csv" name="csv" rows="6" placeholder="student1,STDISCM,4.0"></textarea>
+  <p><button>Upload</button></p>
+</form>
+<script>
+  document.getElementById('file').onchange = async (e) => {
+    const f = e.target.files[0];
+    if (f) document.getElementById('csv').value = await f.text();
+  };
+</script>
+<% } %>
+<%- include('partials/footer') %>

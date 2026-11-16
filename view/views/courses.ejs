@@ -1,0 +1,24 @@
+<%- include('partials/header') %>
+<h1>Courses</h1>
+<% if (courses.length) { %>
+<table>
+  <tr><th>Code</th><th>Title</th><th>Seats</th><th>Status</th><% if (user.role === 'student') { %><th></th><% } %></tr>
+  <% for (const c of courses) { %>
+  <tr>
+    <td><%= c.code %></td>
+    <td><%= c.title %></td>
+    <td><%= c.enrolled %> / <%= c.capacity %></td>
+    <td><%= !c.open ? 'Closed' : c.enrolled >= c.capacity ? 'Full' : 'Open' %></td>
+    <% if (user.role === 'student') { %>
+    <td>
+      <% if (c.mine) { %>Enrolled
+      <% } else if (c.open && c.enrolled < c.capacity) { %>
+        <form method="post" action="/courses/<%= encodeURIComponent(c.code) %>/enroll"><button>Enroll</button></form>
+      <% } %>
+    </td>
+    <% } %>
+  </tr>
+  <% } %>
+</table>
+<% } %>
+<%- include('partials/footer') %>

@@ -1,0 +1,11 @@
+<%- include('partials/header') %>
+<h1>Log in</h1>
+<form method="post" action="/login">
+  <label for="username">Username</label>
+  <input id="username" name="username" required autofocus>
+  <label for="password">Password</label>
+  <input id="password" name="password" type="password" required>
+  <p><button>Log in</button></p>
+</form>
+<p class="muted">Demo accounts: student1, student2, faculty1 (password: password)</p>
+<%- include('partials/footer') %>

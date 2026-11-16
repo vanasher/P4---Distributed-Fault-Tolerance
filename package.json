@@ -1,0 +1,25 @@
+{
+  "name": "p4-enrollment",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Distributed online enrollment system: MVC view node plus gRPC service nodes",
+  "scripts": {
+    "auth": "node services/auth.js",
+    "course": "node services/course.js",
+    "grade": "node services/grade.js",
+    "view": "node view/app.js",
+    "test": "node test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vanasher/P4---Distributed-Fault-Tolerance.git"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.7",
+    "@grpc/proto-loader": "^0.8.1",
+    "cookie-parser": "^1.4.7",
+    "ejs": "^7.0.2",
+    "express": "^5.3.0",
+    "jsonwebtoken": "^9.0.3"
+  }
+}

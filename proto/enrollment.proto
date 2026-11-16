@@ -1,0 +1,39 @@
+syntax = "proto3";
+package enrollment;
+
+// Every call except Login carries the JWT in the "authorization" metadata header.
+message Empty {}
+
+// ---- Auth node ----
+service Auth {
+  rpc Login (LoginRequest) returns (LoginReply);
+  rpc Logout (Empty) returns (Empty);
+}
+message LoginRequest { string username = 1; string password = 2; }
+message LoginReply { string token = 1; string username = 2; string role = 3; }
+
+// ---- Course node ----
+service Course {
+  rpc ListCourses (Empty) returns (CourseList);
+  rpc Enroll (EnrollRequest) returns (Empty);
+}
+message CourseInfo {
+  string code = 1;
+  string title = 2;
+  int32 capacity = 3;
+  int32 enrolled = 4;
+  bool open = 5;
+  bool mine = 6;  // the caller is enrolled in it
+}
+message CourseList { repeated CourseInfo courses = 1; }
+message EnrollRequest { string code = 1; }
+
+// ---- Grade node ----
+service Grade {
+  rpc MyGrades (Empty) returns (GradeList);        // students: own grades, faculty: all grades
+  rpc UploadGrades (UploadRequest) returns (UploadReply);  // faculty only
+}
+message GradeEntry { string student = 1; string course = 2; string grade = 3; }
+message GradeList { repeated GradeEntry grades = 1; }
+message UploadRequest { repeated GradeEntry grades = 1; }
+message UploadReply { int32 saved = 1; }
