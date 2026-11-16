@@ -4,7 +4,7 @@ An online enrollment system split across four nodes. The view node is an Express
 
 | Node | File | Default address | Features |
 |---|---|---|---|
-| View (MVC) | `view/app.js` | http://localhost:3000 | Web pages; calls the services over gRPC |
+| View (MVC) | `view/app.js` | https://localhost:3000 | Web pages; calls the services over gRPC |
 | Auth | `services/auth.js` | localhost:50051 | Login / logout, issues JWTs, tracks sessions |
 | Course | `services/course.js` | localhost:50052 | View courses, enroll in open courses |
 | Grade | `services/grade.js` | localhost:50053 | View previous grades, faculty upload grades |
@@ -32,9 +32,22 @@ npm run grade
 npm run view
 ```
 
-Then open http://localhost:3000. The demo accounts are `student1`, `student2` and `faculty1`, all with password `password`.
+Then open https://localhost:3000. The demo accounts are `student1`, `student2` and `faculty1`, all with password `password`.
 
 To reset the data, stop everything and delete the `data/` folder.
+
+### HTTPS certificate
+
+The view node serves HTTPS only. The first time it starts, it creates a self-signed certificate in `certs/`. With that certificate the browser shows a warning; click **Advanced → Proceed** once.
+
+To get no warning at all, install `mkcert` (`scoop install mkcert`). Then run this from the repo folder before starting the view:
+
+```
+mkcert -install
+mkcert -cert-file certs/cert.pem -key-file certs/key.pem localhost 127.0.0.1 <this machine's LAN IP>
+```
+
+Internal gRPC traffic between the nodes is plaintext.
 
 ## Run (separate machines / VMs)
 

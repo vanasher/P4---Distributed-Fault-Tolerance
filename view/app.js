@@ -1,4 +1,6 @@
 // View node: Express MVC. Controllers are the routes below, models are the gRPC clients, views are the EJS files.
+const fs = require('node:fs');
+const https = require('node:https');
 const path = require('node:path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
@@ -41,7 +43,7 @@ app.get('/login', (req, res) => res.render('login'));
 app.post('/login', async (req, res) => {
   try {
     const { token } = await call('auth', 'Login', { username: req.body.username, password: req.body.password });
-    res.cookie('token', token, { httpOnly: true, sameSite: 'lax', maxAge: 3600 * 1000 });
+    res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'lax', maxAge: 3600 * 1000 });
     res.redirect('/courses');
   } catch (err) {
     res.render('login', { error: err.details });
@@ -99,5 +101,21 @@ app.post('/grades', loggedIn, async (req, res) => {
   }
 });
 
+// HTTPS. Uses certs/cert.pem + certs/key.pem (e.g. from mkcert); creates a self-signed pair if missing.
+async function tls() {
+  const dir = process.env.CERT_DIR || path.join(__dirname, '..', 'certs');
+  const files = { cert: path.join(dir, 'cert.pem'), key: path.join(dir, 'key.pem') };
+  if (!fs.existsSync(files.cert)) {
+    const pems = await require('selfsigned').generate([{ name: 'commonName', value: 'localhost' }], { days: 365 });
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(files.cert, pems.cert);
+    fs.writeFileSync(files.key, pems.private);
+    console.log(`Created a self-signed certificate in ${dir}`);
+  }
+  return { cert: fs.readFileSync(files.cert), key: fs.readFileSync(files.key) };
+}
+
 const port = process.env.VIEW_PORT || 3000;
-app.listen(port, '0.0.0.0', () => console.log(`View node on http://localhost:${port}`));
+tls().then((options) =>
+  https.createServer(options, app).listen(port, '0.0.0.0', () => console.log(`View node on https://localhost:${port}`))
+);

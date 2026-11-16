@@ -6,15 +6,18 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; // the test's view node uses a throwaway self-signed cert
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'p4-test-'));
 const env = {
   ...process.env,
+  CERT_DIR: tmp,
   AUTH_ADDR: 'localhost:51051',
   COURSE_ADDR: 'localhost:51052',
   GRADE_ADDR: 'localhost:51053',
   VIEW_PORT: '3100',
-  DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'p4-test-')),
+  DATA_DIR: tmp,
 };
-const BASE = 'http://localhost:3100';
+const BASE = 'https://localhost:3100';
 const nodes = {};
 for (const name of ['auth', 'course', 'grade']) nodes[name] = spawn('node', [`services/${name}.js`], { env, cwd: __dirname });
 nodes.view = spawn('node', ['view/app.js'], { env, cwd: __dirname });
