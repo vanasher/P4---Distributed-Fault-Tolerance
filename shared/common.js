@@ -25,19 +25,6 @@ function fail(code, details) {
   throw { code: grpc.status[code], details };
 }
 
-// Verifies the JWT locally (no call to the auth node), so a dead auth node does not log everyone out.
-// Add a revocation list pushed from the auth node if that matters.
-function requireUser(call, role) {
-  let user;
-  try {
-    user = jwt.verify(String(call.metadata.get('authorization')[0] || ''), SECRET);
-  } catch {
-    fail('UNAUTHENTICATED', 'Please log in again.');
-  }
-  if (role && user.role !== role) fail('PERMISSION_DENIED', `Only ${role} accounts can do that.`);
-  return user;
-}
-
 // PostgreSQL: one shared server, one database per service (database-per-service pattern).
 const PG = {
   host: process.env.PGHOST || 'localhost',
