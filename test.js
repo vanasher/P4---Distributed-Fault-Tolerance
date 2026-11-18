@@ -146,7 +146,7 @@ async function main() {
   assert.match((await req('GET', '/grades', { cookie: student })).body, /grade service is down/);
   assert.match((await req('GET', '/courses', { cookie: student })).body, /STDISCM/);
 
-  // Grade node restarts -> view reconnects on its own, and the uploaded grade survived (persisted in SQLite).
+  // Grade node restarts -> view reconnects on its own, and the uploaded grade survived (persisted in PostgreSQL).
   nodes.grade = spawn('node', ['services/grade.js'], { env, cwd: __dirname });
   let back = '';
   for (let i = 0; i < 20 && !/STDISCM/.test(back); i++) {
@@ -155,6 +155,13 @@ async function main() {
   }
   assert.match(back, /STDISCM/);
 
+  // Logout revokes the token on every node (after the next revocation sync).
+  const temp = await login('student2');
+  assert.match((await req('GET', '/courses', { cookie: temp })).body, /STDISCM/);
+  await req('POST', '/logout', { cookie: temp });
+  await sleep(1500);
+  assert.match((await req('GET', '/courses', { cookie: temp })).location, /^\/login\?error=Please log in again/);  
+  
   // Auth node down -> new logins fail, but existing sessions keep working (JWT is verified locally).
   nodes.auth.kill();
   await sleep(500);

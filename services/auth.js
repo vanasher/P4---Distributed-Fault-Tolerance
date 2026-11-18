@@ -9,7 +9,8 @@ main(async () => {
   const db = await openDb('auth', `
     CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, salt TEXT NOT NULL, hash TEXT NOT NULL, role TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, username TEXT NOT NULL, created TIMESTAMPTZ NOT NULL DEFAULT now());
-  `);
+    CREATE TABLE IF NOT EXISTS revoked (jti TEXT PRIMARY KEY, expires TIMESTAMPTZ NOT NULL);
+    `);
 
   for (const [username, role] of [['student1', 'student'], ['student2', 'student'], ['faculty1', 'faculty']]) {
     const salt = crypto.randomBytes(16).toString('hex');
@@ -31,7 +32,15 @@ main(async () => {
     async Logout(call) {
       const user = requireUser(call);
       await db.query('DELETE FROM sessions WHERE id = $1', [user.jti]);
+      await db.query('INSERT INTO revoked VALUES ($1, to_timestamp($2)) ON CONFLICT DO NOTHING', [user.jti, user.exp]);
       return {};
+    },
+
+    async ListRevoked(call) {
+      requireUser(call, 'service');                       // only nodes holding the shared secret
+      await db.query('DELETE FROM revoked WHERE expires < now()');  // token would be expired anyway
+      const { rows } = await db.query('SELECT jti FROM revoked');
+      return { jti: rows.map((r) => r.jti) };
     },
   });
 });

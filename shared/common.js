@@ -26,7 +26,6 @@ function fail(code, details) {
 }
 
 // Verifies the JWT locally (no call to the auth node), so a dead auth node does not log everyone out.
-// ponytail: logout is not checked here, a logged-out token stays valid on other nodes until it expires (1h).
 // Add a revocation list pushed from the auth node if that matters.
 function requireUser(call, role) {
   let user;
@@ -47,6 +46,35 @@ const PG = {
   password: process.env.PGPASSWORD || 'p4',
 };
 let pool; // this process's connection pool (one per service node)
+
+const revoked = new Set();
+
+function requireUser(call, role) {
+  let user;
+  try {
+    user = jwt.verify(String(call.metadata.get('authorization')[0] || ''), SECRET);
+  } catch {
+    fail('UNAUTHENTICATED', 'Please log in again.');
+  }
+  if (revoked.has(user.jti)) fail('UNAUTHENTICATED', 'Please log in again.');
+  if (role && user.role !== role) fail('PERMISSION_DENIED', `Only ${role} accounts can do that.`);
+  return user;
+}
+
+// Every non-auth node pulls the revoked-session list from Auth. If Auth is down, keep the last known list.
+function syncRevocations(self) {
+  const { call } = require('./clients'); // lazy: clients.js itself requires this file
+  const tick = async () => {
+    try {
+      const token = jwt.sign({ sub: self, role: 'service' }, SECRET, { expiresIn: '1m' });
+      const { jti } = await call('auth', 'ListRevoked', {}, token, 1000);
+      revoked.clear();
+      jti.forEach((j) => revoked.add(j));
+    } catch {}
+  };
+  tick();
+  setInterval(tick, Number(process.env.REVOKE_POLL_MS || 5000));
+}
 
 // Opens this service's connection pool, creating its database and tables on first start.
 // Retries for ~30s so a service can start before PostgreSQL is ready.
@@ -110,6 +138,9 @@ function toGrpcError(e) {
 
 // Starts a gRPC server for one service. Handlers return the reply (or a promise of it) or throw via fail().
 function serve(name, handlers) {
+  if (name !== 'Auth')
+    syncRevocations(name); // only non-auth nodes need to pull the revocation list from Auth
+  
   const impl = {};
   for (const [method, fn] of Object.entries(handlers)) {
     impl[method] = (call, cb) => {
