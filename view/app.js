@@ -6,21 +6,25 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken');
 const { call, grpc } = require('../shared/clients');
-const { SECRET } = require('../shared/common');
+const { SECRET, RULES } = require('../shared/common');
 
 const app = express();
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: false, limit: '100kb', parameterLimit: 20 }));
 app.use(cookieParser());
+
+// ?msg= and ?error= come from the URL, so anyone can edit them. Accept a single string only, cap its
+// length, and let EJS escape it (<%= %>), so the text cannot inject HTML.
+const note = (value) => (typeof value === 'string' && value ? value.slice(0, 300) : null);
 
 app.use((req, res, next) => {
   try {
-    req.user = jwt.verify(req.cookies.token, SECRET);
+    req.user = jwt.verify(req.cookies.token, SECRET, { algorithms: ['HS256'] });
   } catch {
-    req.user = null;
+    req.user = null; // missing, expired, or forged cookie: treated as logged out
   }
-  Object.assign(res.locals, { user: req.user, msg: req.query.msg || null, error: req.query.error || null });
+  Object.assign(res.locals, { user: req.user, msg: note(req.query.msg), error: note(req.query.error) });
   next();
 });
 
@@ -47,6 +51,9 @@ app.post('/login', async (req, res) => {
   const username = field(req, 'username').trim();
   const password = field(req, 'password');
   if (!username || !password) return res.render('login', { error: 'Enter your username and password.' });
+  if (!RULES.username.test(username) || password.length > RULES.passwordMax) {
+    return res.render('login', { error: 'Wrong username or password.' }); // same text as a real mismatch
+  }
   try {
     const { token } = await call('auth', 'Login', { username, password });
     res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'lax', maxAge: 3600 * 1000 });
@@ -57,9 +64,15 @@ app.post('/login', async (req, res) => {
 });
 
 app.post('/logout', async (req, res) => {
-  await call('auth', 'Logout', {}, req.cookies.token).catch(() => {}); // still log out locally if the auth node is down
-  res.clearCookie('token');
-  res.redirect('/login');
+  try {
+    await call('auth', 'Logout', {}, req.cookies.token); // revokes the token on every node
+  } catch (err) {
+    console.log(`Logout could not reach the auth node: ${err.details || err.message}`);
+  } finally {
+    // Always log out in this browser, even when the auth node is down.
+    res.clearCookie('token');
+    res.redirect('/login');
+  }
 });
 
 app.get('/courses', loggedIn, async (req, res) => {
@@ -72,9 +85,11 @@ app.get('/courses', loggedIn, async (req, res) => {
 });
 
 app.post('/courses/:code/enroll', loggedIn, async (req, res) => {
+  const code = req.params.code.trim().toUpperCase();
+  if (!RULES.course.test(code)) return back(res, '/courses', 'error', 'Invalid course code.');
   try {
-    await call('course', 'Enroll', { code: req.params.code }, req.cookies.token);
-    back(res, '/courses', 'msg', `Enrolled in ${req.params.code.toUpperCase()}.`);
+    await call('course', 'Enroll', { code }, req.cookies.token);
+    back(res, '/courses', 'msg', `Enrolled in ${code}.`);
   } catch (err) {
     back(res, err.code === grpc.status.UNAUTHENTICATED ? '/login' : '/courses', 'error', err.details);
   }
@@ -137,9 +152,10 @@ app.get('/schedule', loggedIn, async (req, res) => {
 
 // Last resort: never show a stack trace. Oversized form posts (>100 KB) go back with a message.
 app.use((err, req, res, next) => {
-  if (err.type === 'entity.too.large') {
+  if (err.type === 'entity.too.large' || err.type === 'parameters.too.many') {
     const page = ['/grades', '/announcements'].includes(req.path) ? req.path : '/login';
-    return back(res, page, 'error', 'That upload is too large (limit 100 KB).');
+    const text = err.type === 'entity.too.large' ? 'That upload is too large (limit 100 KB).' : 'That form has too many fields.';
+    return back(res, page, 'error', text);
   }
   console.error(err);
   res.status(500).type('text').send('Something went wrong. Please go back and try again.');
@@ -149,7 +165,7 @@ app.use((err, req, res, next) => {
 async function tls() {
   const dir = process.env.CERT_DIR || path.join(__dirname, '..', 'certs');
   const files = { cert: path.join(dir, 'cert.pem'), key: path.join(dir, 'key.pem') };
-  if (!fs.existsSync(files.cert)) {
+  if (!fs.existsSync(files.cert) || !fs.existsSync(files.key)) {
     const pems = await require('selfsigned').generate([{ name: 'commonName', value: 'localhost' }], { days: 365 });
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(files.cert, pems.cert);
@@ -159,7 +175,19 @@ async function tls() {
   return { cert: fs.readFileSync(files.cert), key: fs.readFileSync(files.key) };
 }
 
-const port = process.env.VIEW_PORT || 3000;
-tls().then((options) =>
-  https.createServer(options, app).listen(port, '0.0.0.0', () => console.log(`View node on https://localhost:${port}`))
-);
+async function start() {
+  const port = Number(process.env.VIEW_PORT || 3000);
+  try {
+    const server = https.createServer(await tls(), app);
+    server.on('error', (err) => {
+      console.error(`View node cannot listen on port ${port}: ${err.message} (is another copy already running?)`);
+      process.exit(1);
+    });
+    server.listen(port, '0.0.0.0', () => console.log(`View node on https://localhost:${port}`));
+  } catch (err) {
+    // For example, a damaged cert.pem or key.pem. Delete the certs folder to get a new self-signed pair.
+    console.error(`View node cannot start HTTPS: ${err.message}`);
+    process.exit(1);
+  }
+}
+start();

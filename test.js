@@ -276,6 +276,16 @@ async function main() {
   expectEqual('Username with surrounding spaces still logs in (trimmed)', !!(await req('POST', '/login', { form: { username: ' student1 ', password: 'password' } })).cookie, true);
   expectMatch('A 5000-character course code is rejected', await req('POST', `/courses/${'A'.repeat(5000)}/enroll`, { cookie: student }), /Invalid course code/);
   expectMatch('Course code is case-insensitive (csopesy)', await req('POST', '/courses/csopesy/enroll', { cookie: student }), /Enrolled in CSOPESY/);
+  expectMatch('Login with symbols in the username is refused', await req('POST', '/login', { form: { username: "admin'--", password: 'x' } }), /Wrong username or password/);
+  expectMatch('Login with a 5000-character password is refused', await req('POST', '/login', { form: { username: 'student1', password: 'x'.repeat(5000) } }), /Wrong username or password/);
+  expectMatch('A form with too many fields is refused with a message', await req('POST', '/announcements', { cookie: faculty, form: Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`f${i}`, 'x'])) }), /too many fields/);
+  const reflected = await req('GET', '/courses?msg=<script>alert(1)</script>', { cookie: student });
+  expectNoMatch('HTML in ?msg= is escaped, not run', reflected, /<script>alert/);
+  expectEqual('A repeated ?error= parameter does not crash the page', (await req('GET', '/courses?error=a&error=b', { cookie: student })).status, 200);
+  // The services check input themselves too, because any gRPC client can skip the view.
+  await expectRejects('auth node refuses a bad username sent directly over gRPC', call('auth', 'Login', { username: 'a b', password: 'x' }), 'INVALID_ARGUMENT');
+  await expectRejects('auth node refuses a 200-character password sent directly over gRPC', call('auth', 'Login', { username: 'student1', password: 'x'.repeat(200) }), 'INVALID_ARGUMENT');
+  await expectRejects('course node refuses a bad course code sent directly over gRPC', call('course', 'Enroll', { code: '../x' }, tokenOf(student)), 'INVALID_ARGUMENT');
 
   // ---------- Bonus: extra feature nodes (announcements, schedule) ----------
   section('Bonus: announcement and schedule nodes');

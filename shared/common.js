@@ -25,6 +25,14 @@ function fail(code, details) {
   throw { code: grpc.status[code], details };
 }
 
+// Input rules shared by the view (early, friendly check) and the services (the real check: any gRPC
+// client can call a service directly, so a service never trusts that the view checked first).
+const RULES = {
+  username: /^[A-Za-z0-9_.-]{1,32}$/,
+  course: /^[A-Z0-9-]{2,12}$/, // after toUpperCase()
+  passwordMax: 128,
+};
+
 // PostgreSQL: one shared server, one database per service (database-per-service pattern).
 const PG = {
   host: process.env.PGHOST || 'localhost',
@@ -39,7 +47,7 @@ const revoked = new Set();
 function requireUser(call, role) {
   let user;
   try {
-    user = jwt.verify(String(call.metadata.get('authorization')[0] || ''), SECRET);
+    user = jwt.verify(String(call.metadata.get('authorization')[0] || ''), SECRET, { algorithms: ['HS256'] });
   } catch {
     fail('UNAUTHENTICATED', 'Please log in again.');
   }
@@ -57,10 +65,14 @@ function syncRevocations(self) {
       const { jti } = await call('auth', 'ListRevoked', {}, token, 1000);
       revoked.clear();
       jti.forEach((j) => revoked.add(j));
-    } catch {}
+    } catch {
+      // Auth node down: keep the last known list and try again on the next tick.
+    } finally {
+      // Schedule the next tick only after this one ends, so slow calls never pile up.
+      setTimeout(tick, Number(process.env.REVOKE_POLL_MS || 5000)).unref();
+    }
   };
   tick();
-  setInterval(tick, Number(process.env.REVOKE_POLL_MS || 5000));
 }
 
 // Opens this service's connection pool, creating its database and tables on first start.
@@ -120,7 +132,9 @@ function toGrpcError(e) {
   if (typeof e.code === 'number') return { code: e.code, details: e.details };
   const dbDown = /ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENOTFOUND|timeout exceeded when trying to connect|Connection terminated|terminating connection/i;
   if (dbDown.test(e.message) || /^(08|57P)/.test(e.code || '')) return { code: grpc.status.UNAVAILABLE, details: 'The database is unavailable right now.' };
-  return { code: grpc.status.INTERNAL, details: String(e.message) };
+  // Unexpected error: the full error goes to this node's log only. The caller gets no SQL or stack details.
+  console.error(e);
+  return { code: grpc.status.INTERNAL, details: 'Something went wrong. Please try again.' };
 }
 
 // Starts a gRPC server for one service. Handlers return the reply (or a promise of it) or throw via fail().
@@ -130,26 +144,31 @@ function serve(name, handlers) {
   
   const impl = {};
   for (const [method, fn] of Object.entries(handlers)) {
-    impl[method] = (call, cb) => {
-      const stats = () => (pool ? ` [pool: ${pool.totalCount} open, ${pool.idleCount} idle, ${pool.waitingCount} waiting]` : '');
-      Promise.resolve()
-        .then(() => fn(call))
-        .then((reply) => {
-          console.log(`${new Date().toISOString()} ${name}.${method} ok${stats()}`);
-          cb(null, reply);
-        })
-        .catch((e) => {
-          const err = toGrpcError(e);
-          console.log(`${new Date().toISOString()} ${name}.${method} failed: ${err.details}${stats()}`);
-          cb(err);
-        });
+    impl[method] = async (call, cb) => {
+      const started = Date.now();
+      let reply = null;
+      let err = null;
+      try {
+        reply = await fn(call);
+      } catch (e) {
+        err = toGrpcError(e);
+      } finally {
+        // One log line per request, success or failure, with the time taken and the pool state.
+        const stats = pool ? ` [pool: ${pool.totalCount} open, ${pool.idleCount} idle, ${pool.waitingCount} waiting]` : '';
+        const outcome = err ? `failed: ${err.details}` : 'ok';
+        console.log(`${new Date().toISOString()} ${name}.${method} ${outcome} (${Date.now() - started} ms)${stats}`);
+      }
+      cb(err, reply);
     };
   }
   const server = new grpc.Server();
   server.addService(proto[name].service, impl);
   const port = ADDR[name.toLowerCase()].split(':').pop();
   server.bindAsync(`0.0.0.0:${port}`, grpc.ServerCredentials.createInsecure(), (err) => {
-    if (err) throw err;
+    if (err) {
+      console.error(`${name} node cannot listen on port ${port}: ${err.message} (is another copy already running?)`);
+      process.exit(1);
+    }
     console.log(`${name} node listening on port ${port}`);
   });
 }
@@ -162,4 +181,4 @@ function main(fn) {
   });
 }
 
-module.exports = { grpc, proto, SECRET, ADDR, fail, requireUser, openDb, transaction, serve, main };
+module.exports = { grpc, proto, SECRET, ADDR, RULES, fail, requireUser, openDb, transaction, serve, main };

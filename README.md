@@ -128,7 +128,36 @@ This needs PostgreSQL running (`docker compose up -d db`). It starts all six nod
 - **Separate nodes, separate data.** Each feature runs in its own process with its own database, so a crash only takes out that one feature.
 - **Database outages are contained.** If PostgreSQL is unreachable, the pool fails the request within 1 second, and the service answers `UNAVAILABLE` with "The database is unavailable right now." The view stays up and shows that message. When the database comes back, the pools reconnect without restarting anything. The shared database server is still a single point of failure; the redundant-database bonus removes it.
 - **Fail fast, degrade locally.** The view node gives every gRPC call a 2-second deadline. When a node is down, its call fails with `UNAVAILABLE`, and only that page shows "the X service is down". The other pages keep working.
+- **Circuit breaker.** A stopped container's IP never answers; it doesn't refuse the connection. So the first call to a dead node waits out the 2-second deadline. After that failure, the view marks the service as down, and later clicks fail in a few milliseconds instead of 2 seconds each. Meanwhile the gRPC channel keeps reconnecting in the background. The first call after the channel is ready again closes the breaker, and the node is back within about a second of restarting.
 - **Sessions survive the auth node going down.** Login returns a signed JWT that the view stores in a cookie and forwards with every gRPC call. Every service checks the signature itself with the shared secret, so it doesn't need to ask the auth node. Users who are already logged in keep using courses and grades while auth is down; only new logins fail.
 - **Automatic recovery.** The gRPC clients reconnect with a short backoff, capped at 2 seconds, so a restarted node is picked up without restarting the view. The data persists in PostgreSQL, so nothing is lost across a restart.
 - **No overbooking.** Enrollment runs in a transaction that locks the course row (`SELECT ... FOR UPDATE`). Concurrent enrollments for one course take turns, so two students can never both take the last seat.
 - **Graceful degradation between nodes.** The schedule node depends on the course node to know which classes a student is in. If the course node is down, the schedule node doesn't fail. It shows every class with a note saying enrollments couldn't be loaded. Its call to the course node uses a 1-second deadline, so it answers before the view's 2-second deadline runs out.
+
+## Input validation and error handling
+
+The view checks input first, so the user gets a quick message. Each service checks the same input again, because any gRPC client can call a service directly. The rules are in one place, `RULES` in `shared/common.js`.
+
+| Input | Rule | Checked in |
+| --- | --- | --- |
+| Username | 1 to 32 letters, digits, `.`, `_` or `-`; spaces trimmed | view, auth node, grade node |
+| Password | 1 to 128 characters | view, auth node |
+| Course code | 2 to 12 letters, digits or `-`; not case-sensitive | view, course node, grade node |
+| Grade | one of 4.0, 3.5, 3.0, 2.5, 2.0, 1.5, 1.0, 0.0 (`4` becomes `4.0`) | grade node |
+| Grade upload | 3 fields per line, at most 1000 lines, no student twice for one course, all lines saved or none | view, grade node |
+| Announcement | title 1 to 100 characters, message 1 to 2000 characters | announcement node |
+| Any form | at most 100 KB and 20 fields; a missing or repeated field counts as empty | view |
+| `?msg=` and `?error=` | one string only, at most 300 characters, HTML-escaped by EJS | view |
+| Login token | HS256 signature only, not expired, not revoked by a logout | view, every service |
+
+All SQL uses parameters (`$1`), never string joins, so input cannot change a query.
+
+Error handling uses `try`/`catch`/`finally` in these places:
+
+- `serve()` in `shared/common.js` wraps every gRPC handler. `catch` turns any error into a gRPC status. `finally` writes one log line per request with the time taken and the pool state. An unexpected error goes to the node's log only. The caller gets "Something went wrong", with no SQL or stack details.
+- `transaction()` runs `COMMIT` in `try`, `ROLLBACK` in `catch`, and returns the connection to the pool in `finally`.
+- `openDb()` retries the database for 30 seconds, and closes the setup connection in `finally`.
+- The revocation sync catches a down auth node, keeps the last list, and schedules the next sync in `finally`.
+- Logout calls the auth node in `try`, logs a failure in `catch`, and always clears the cookie in `finally`.
+- Every page route catches a failed gRPC call and shows the error on the page instead of crashing.
+- Startup catches a bad certificate or a port already in use, and exits with a clear message.

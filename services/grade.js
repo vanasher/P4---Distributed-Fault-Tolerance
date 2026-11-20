@@ -1,5 +1,5 @@
 // Grade node: students view grades, faculty upload them.
-const { fail, requireUser, openDb, serve, main } = require('../shared/common');
+const { RULES, fail, requireUser, openDb, serve, main } = require('../shared/common');
 
 const GRADES = ['4.0', '3.5', '3.0', '2.5', '2.0', '1.5', '1.0', '0.0'];
 const MAX_ROWS = 1000;
@@ -34,8 +34,8 @@ main(async () => {
       const rows = entries.map((g) => {
         const row = { student: g.student.trim(), course: g.course.trim().toUpperCase(), grade: g.grade.trim() };
         const where = `"${clip(`${g.student},${g.course},${g.grade}`)}"`;
-        if (!/^[A-Za-z0-9_.-]{1,32}$/.test(row.student)) fail('INVALID_ARGUMENT', `${where}: invalid student username.`);
-        if (!/^[A-Z0-9-]{2,12}$/.test(row.course)) fail('INVALID_ARGUMENT', `${where}: invalid course code.`);
+        if (!RULES.username.test(row.student)) fail('INVALID_ARGUMENT', `${where}: invalid student username.`);
+        if (!RULES.course.test(row.course)) fail('INVALID_ARGUMENT', `${where}: invalid course code.`);
         // Accept "4", "4.0", "4.00"; store the canonical "4.0". Rejects "3.25", "4.5", "", "abc".
         row.grade = /^\d+(\.\d+)?$/.test(row.grade) && GRADES.find((x) => Number(x) === Number(row.grade));
         if (!row.grade) fail('INVALID_ARGUMENT', `${where}: grade must be one of ${GRADES.join(', ')}.`);

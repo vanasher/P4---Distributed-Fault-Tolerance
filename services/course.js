@@ -1,5 +1,5 @@
 // Course node: lists courses and handles enrollment.
-const { fail, requireUser, openDb, transaction, serve, main } = require('../shared/common');
+const { RULES, fail, requireUser, openDb, transaction, serve, main } = require('../shared/common');
 
 main(async () => {
   const db = await openDb('course', `
@@ -31,7 +31,7 @@ main(async () => {
     async Enroll(call) {
       const user = requireUser(call, 'student');
       const code = call.request.code.trim().toUpperCase();
-      if (!/^[A-Z0-9-]{2,12}$/.test(code)) fail('INVALID_ARGUMENT', 'Invalid course code.');
+      if (!RULES.course.test(code)) fail('INVALID_ARGUMENT', 'Invalid course code.');
 
       try {
         await transaction(async (tx) => {

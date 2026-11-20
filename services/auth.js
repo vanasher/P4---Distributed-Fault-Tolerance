@@ -1,9 +1,10 @@
 // Auth node: checks passwords, issues JWTs, tracks sessions.
 const crypto = require('node:crypto');
 const jwt = require('jsonwebtoken');
-const { SECRET, fail, requireUser, openDb, serve, main } = require('../shared/common');
+const { SECRET, RULES, fail, requireUser, openDb, serve, main } = require('../shared/common');
 
 const hash = (password, salt) => crypto.scryptSync(password, salt, 32).toString('hex');
+const DUMMY_SALT = crypto.randomBytes(16).toString('hex');
 
 main(async () => {
   const db = await openDb('auth', `
@@ -18,9 +19,17 @@ main(async () => {
   }
 
   serve('Auth', {
-    async Login({ request: { username, password } }) {
+    async Login({ request }) {
+      const username = request.username.trim();
+      const { password } = request;
+      if (!username || !password) fail('INVALID_ARGUMENT', 'Enter your username and password.');
+      if (!RULES.username.test(username)) fail('INVALID_ARGUMENT', 'Usernames use only letters, digits, ".", "_" and "-" (up to 32).');
+      if (password.length > RULES.passwordMax) fail('INVALID_ARGUMENT', `Passwords are at most ${RULES.passwordMax} characters.`);
+
       const { rows: [user] } = await db.query('SELECT * FROM users WHERE username = $1', [username]);
-      const ok = user && crypto.timingSafeEqual(Buffer.from(hash(password, user.salt), 'hex'), Buffer.from(user.hash, 'hex'));
+      // Hash even for an unknown username, so the response time does not reveal which usernames exist.
+      const computed = Buffer.from(hash(password, user ? user.salt : DUMMY_SALT), 'hex');
+      const ok = user && crypto.timingSafeEqual(computed, Buffer.from(user.hash, 'hex'));
       if (!ok) fail('UNAUTHENTICATED', 'Wrong username or password.');
 
       const id = crypto.randomUUID();
